@@ -79,8 +79,6 @@ As bases do projeto podem ser obtidas em fontes públicas e amplamente utilizada
 - **Yahoo Finance**
 - outras bases públicas complementares
 
-> Observação: as fontes específicas e links utilizados podem ser documentados posteriormente na pasta `docs/` ou em uma seção dedicada do projeto.
-
 ---
 
 ## Metodologia
