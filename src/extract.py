@@ -49,9 +49,66 @@ def _fetch_yahoo(
         raise ValueError(msg)
 
     raw_df = cast(pd.DataFrame, raw)
-    df = raw_df[["Close"]].rename(columns={"Close": col_name})
+    if isinstance(raw_df.columns, pd.MultiIndex):
+        close_data = raw_df["Close"]
+        if isinstance(close_data, pd.DataFrame):
+            close_series = close_data.iloc[:, 0]
+        else:
+            close_series = close_data
+        df = close_series.to_frame(name=col_name)
+    else:
+        df = raw_df[["Close"]].rename(columns={"Close": col_name})
+
     df.index.name = "data"
     return df
+
+
+def _fetch_bcb_daily_chunked(
+    serie: int, col_name: str, start: str, end: str
+) -> pd.DataFrame:
+    """Coleta séries diárias do BCB em janelas <= 10 anos."""
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    chunks: list[pd.DataFrame] = []
+    window = pd.DateOffset(years=5)
+    cursor = start_ts
+
+    while cursor <= end_ts:
+        chunk_end = min(cursor + window - pd.Timedelta(days=1), end_ts)
+        chunk_start_str = cursor.strftime("%Y-%m-%d")
+        chunk_end_str = chunk_end.strftime("%Y-%m-%d")
+        chunk_df: pd.DataFrame | None = None
+
+        for attempt in range(3):
+            try:
+                chunk_df = _fetch_bcb(
+                    serie,
+                    col_name,
+                    chunk_start_str,
+                    chunk_end_str,
+                )
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(1 + attempt)
+
+        if chunk_df is None:
+            raise ValueError(
+                f"Falha ao coletar série {serie} entre {chunk_start_str} e "
+                f"{chunk_end_str}."
+            )
+
+        chunks.append(chunk_df)
+        cursor = chunk_end + pd.Timedelta(days=1)
+
+    if not chunks:
+        raise ValueError(f"Bacen SGS sem dados para a série {serie}.")
+
+    combined = pd.concat(chunks).sort_index()
+    combined = combined[~combined.index.duplicated(keep="last")]
+    combined.index.name = "data"
+    return combined
 
 
 def fetch_usd_brl(
@@ -148,7 +205,7 @@ def _fetch_bcb(
 
 def fetch_selic(start: str = START_DATE, end: str = END_DATE) -> pd.DataFrame:
     """Meta da Selic — SGS série 432."""
-    df = _fetch_bcb(432, "selic", start, end)
+    df = _fetch_bcb_daily_chunked(432, "selic", start, end)
     save_csv(df, "selic_raw", folder=DATA_RAW)
     logger.info(f"selic salvo → {DATA_RAW}/selic_raw.csv  ({len(df)} linhas)")
     return df
@@ -245,7 +302,7 @@ def fetch_embi_brasil(
 
     df = pd.DataFrame(data)[["VALDATA", "VALVALOR"]]
     df.columns = ["data", "embi_brasil"]
-    df["data"] = pd.to_datetime(df["data"])
+    df["data"] = pd.to_datetime(df["data"], utc=True).dt.tz_convert(None)
     df = df.set_index("data").sort_index()
     df = df.loc[start:end]
 

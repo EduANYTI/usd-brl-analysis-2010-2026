@@ -84,6 +84,8 @@ def _clean_monthly(filename: str, col: str) -> pd.DataFrame:
     df = df[[col]]
 
     df = df.loc[START_DATE:END_DATE]
+    # Alinha séries mensais ao fim do mês.
+    df = df.resample("ME").last()
 
     monthly_nans = df[col].isna().sum()
     logger.info(f"  {filename}: {len(df)} obs. mensais — NaN: {monthly_nans}")
